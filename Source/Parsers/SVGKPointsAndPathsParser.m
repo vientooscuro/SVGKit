@@ -314,15 +314,21 @@ static inline CGPoint SVGCurveReflectedControlPoint(SVGCurve prevCurve)
     return p;
 }
 
-+ (void) readCoordinate:(NSScanner*)scanner intoFloat:(CGFloat*) floatPointer
++ (BOOL) readCoordinate:(NSScanner*)scanner intoFloat:(CGFloat*) floatPointer
 {
+    *floatPointer = 0;
 #if CGFLOAT_IS_DOUBLE
-    if( ![scanner scanDouble:floatPointer])
-		NSAssert(FALSE, @"invalid coord");
+    BOOL scanned = [scanner scanDouble:floatPointer];
 #else
-    if( ![scanner scanFloat:floatPointer])
-		NSAssert(FALSE, @"invalid coord");
+    BOOL scanned = [scanner scanFloat:floatPointer];
 #endif
+    if (!scanned || !isfinite(*floatPointer)) {
+        // Release builds must terminate malformed argument sequences instead of growing CGPath forever.
+        *floatPointer = 0;
+        scanner.scanLocation = scanner.string.length;
+        return NO;
+    }
+    return YES;
 }
 
 /** 
@@ -662,27 +668,16 @@ static inline CGPoint SVGCurveReflectedControlPoint(SVGCurve prevCurve)
  */
 + (SVGCurve) readVerticalLinetoArgumentSequence:(NSScanner*)scanner path:(CGMutablePathRef)path relativeTo:(CGPoint)origin isRelative:(BOOL) isRelative
 {
-    // FIXME: reduce the allocations here; make one CGPoint and update it, not multiple
-    CGFloat yValue;
-    [SVGKPointsAndPathsParser readCoordinate:scanner intoFloat:&yValue];
-    CGPoint vertCoord = CGPointMake(origin.x, origin.y+yValue);
-    CGPoint currentPoint = CGPathGetCurrentPoint(path);
-    CGPoint coord = CGPointMake(currentPoint.x, currentPoint.y+(vertCoord.y-currentPoint.y));
-#if DEBUG_PATH_CREATION
-    SVGKitLogWarn(@"[%@] PATH: VERTICAL LINE to (%2.2f, %2.2f)", [SVGKPointsAndPathsParser class], coord.x, coord.y );
-#endif
-    CGPathAddLineToPoint(path, NULL, coord.x, coord.y);
-
+    CGPoint coord = CGPathGetCurrentPoint(path);
     while (![scanner isAtEnd]) {
-        origin = isRelative ? coord : origin;
-        [SVGKPointsAndPathsParser readCoordinate:scanner intoFloat:&yValue];
-        vertCoord = CGPointMake(origin.x, origin.y+yValue);
-        currentPoint = CGPathGetCurrentPoint(path);
-        coord = CGPointMake(currentPoint.x, currentPoint.y+(vertCoord.y-currentPoint.y));
-    #if DEBUG_PATH_CREATION
-        SVGKitLogWarn(@"[%@] PATH: VERTICAL LINE to (%2.2f, %2.2f)", [SVGKPointsAndPathsParser class], coord.x, coord.y );
-    #endif
+        CGFloat value;
+        if (![SVGKPointsAndPathsParser readCoordinate:scanner intoFloat:&value]) break;
+        CGFloat next = origin.y + value;
+        if (!isfinite(next)) break;
+        coord.y = next;
         CGPathAddLineToPoint(path, NULL, coord.x, coord.y);
+        origin = isRelative ? coord : origin;
+        [SVGKPointsAndPathsParser readCommaAndWhitespace:scanner];
     }
 
     return SVGCurveMakePoint(coord);
@@ -716,27 +711,16 @@ static inline CGPoint SVGCurveReflectedControlPoint(SVGCurve prevCurve)
  */
 + (SVGCurve) readHorizontalLinetoArgumentSequence:(NSScanner*)scanner path:(CGMutablePathRef)path relativeTo:(CGPoint)origin isRelative:(BOOL) isRelative
 {
-	// FIXME: reduce the allocations here; make one CGPoint and update it, not multiple
-    CGFloat xValue;
-	[SVGKPointsAndPathsParser readCoordinate:scanner intoFloat:&xValue];
-    CGPoint horizCoord = CGPointMake(origin.x+xValue, origin.y);
-    CGPoint currentPoint = CGPathGetCurrentPoint(path);
-    CGPoint coord = CGPointMake(currentPoint.x+(horizCoord.x-currentPoint.x), currentPoint.y);
-#if DEBUG_PATH_CREATION
-    SVGKitLogWarn(@"[%@] PATH: HORIZONTAL LINE to (%2.2f, %2.2f)", [SVGKPointsAndPathsParser class], coord.x, coord.y );
-#endif
-    CGPathAddLineToPoint(path, NULL, coord.x, coord.y);
-
+    CGPoint coord = CGPathGetCurrentPoint(path);
     while (![scanner isAtEnd]) {
-        origin = isRelative ? coord : origin;
-        [SVGKPointsAndPathsParser readCoordinate:scanner intoFloat:&xValue];
-        horizCoord = CGPointMake(origin.x+xValue, origin.y);
-        currentPoint = CGPathGetCurrentPoint(path);
-        coord = CGPointMake(currentPoint.x+(horizCoord.x-currentPoint.x), currentPoint.y);
-    #if DEBUG_PATH_CREATION
-        SVGKitLogWarn(@"[%@] PATH: HORIZONTAL LINE to (%2.2f, %2.2f)", [SVGKPointsAndPathsParser class], coord.x, coord.y );
-    #endif
+        CGFloat value;
+        if (![SVGKPointsAndPathsParser readCoordinate:scanner intoFloat:&value]) break;
+        CGFloat next = origin.x + value;
+        if (!isfinite(next)) break;
+        coord.x = next;
         CGPathAddLineToPoint(path, NULL, coord.x, coord.y);
+        origin = isRelative ? coord : origin;
+        [SVGKPointsAndPathsParser readCommaAndWhitespace:scanner];
     }
 
     return SVGCurveMakePoint(coord);
